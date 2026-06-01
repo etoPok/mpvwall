@@ -2,3 +2,5 @@ target/*
 
 *.mp4
 *.txt
+
+log
