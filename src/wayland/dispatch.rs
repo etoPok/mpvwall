@@ -78,29 +78,31 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
                 height,
             } => {
                 info!("Configuration received: {}x{}", width, height);
-                state.logical_width = width;
-                state.logical_height = height;
+                if !state.configured {
+                    state.logical_width = width;
+                    state.logical_height = height;
 
-                if let Some(vp) = &state.viewport {
-                    vp.set_destination(width as i32, height as i32);
-                    info!("Viewport destination set: {}x{}", width, height);
+                    if let Some(vp) = &state.viewport {
+                        vp.set_destination(width as i32, height as i32);
+                        info!("Viewport destination set: {}x{}", width, height);
+                    }
+
+                    state.configured = true;
+                    info!(
+                        "Render target: {}x{} ( output: {}x{}, logical: {}x{} )",
+                        state.width,
+                        state.height,
+                        state.output_width,
+                        state.output_height,
+                        state.logical_width,
+                        state.logical_height
+                    );
                 }
 
                 proxy.ack_configure(serial);
                 if let Some(surface) = &state.surface {
                     surface.commit();
                 }
-
-                state.configured = true;
-                info!(
-                    "Render target: {}x{} ( output: {}x{}, logical: {}x{} )",
-                    state.width,
-                    state.height,
-                    state.output_width,
-                    state.output_height,
-                    state.logical_width,
-                    state.logical_height
-                );
             }
             zwlr_layer_surface_v1::Event::Closed => {
                 warn!("Layer surface closed by the compositor");
