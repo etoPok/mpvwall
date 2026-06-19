@@ -165,6 +165,10 @@ pub fn run(
         s.destroy();
     }
 
+    if let Some(vp) = app.viewport.take() {
+        vp.destroy();
+    }
+
     info!("Clean exit.");
     Ok(())
 }

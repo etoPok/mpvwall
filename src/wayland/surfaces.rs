@@ -1,9 +1,6 @@
 use tracing::info;
 use wayland_client::QueueHandle;
-use wayland_protocols_wlr::layer_shell::v1::client::{
-    zwlr_layer_shell_v1,
-    zwlr_layer_surface_v1,
-};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::app::state::App;
 use crate::wayland::raw::proxy_to_raw_ptr;
@@ -39,6 +36,12 @@ impl App {
         // wayland_backend::ObjectId::as_ptr() returns the native *mut wl_proxy
         // through the public and stable sys backend API.
         self.wl_surface_ptr = proxy_to_raw_ptr(&surface);
+
+        if let Some(vp) = &self.viewporter {
+            let viewport = vp.get_viewport(&surface, qh, ());
+            self.viewport = Some(viewport);
+            info!("Viewport created for surface");
+        }
 
         surface.commit();
 

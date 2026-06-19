@@ -5,7 +5,7 @@ use crate::bindings::egl::{
     EGL_NO_DISPLAY, EGL_NO_SURFACE,
 };
 use crate::bindings::mpv::{mpv_render_context, mpv_render_context_free};
-use crate::bindings::wayland_egl::wl_egl_window_destroy;
+use crate::bindings::wayland_egl::{wl_egl_window_destroy, wl_egl_window_resize};
 
 pub struct RenderState {
     pub egl_display: *mut c_void,
@@ -46,5 +46,16 @@ impl Drop for RenderState {
                 wl_egl_window_destroy(self.egl_window);
             }
         }
+    }
+}
+
+#[allow(dead_code)]
+impl RenderState {
+    pub fn resize(&mut self, width: i32, height: i32) {
+        unsafe {
+            wl_egl_window_resize(self.egl_window, width, height, 0, 0);
+        }
+        self.width = width;
+        self.height = height;
     }
 }

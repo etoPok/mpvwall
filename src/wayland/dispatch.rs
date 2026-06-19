@@ -16,6 +16,10 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1},
 };
 
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport::WpViewport, wp_viewporter::WpViewporter,
+};
+
 use crate::app::state::App;
 
 impl Dispatch<WlRegistry, GlobalListContents> for App {
@@ -44,6 +48,8 @@ impl Dispatch<WlOutput, ()> for App {
                 info!("Output mode detected: {}x{}", width, height);
                 state.width = width as u32;
                 state.height = height as u32;
+                state.output_width = width as u32;
+                state.output_height = height as u32;
             }
         }
     }
@@ -53,6 +59,8 @@ delegate_noop!(App: ignore WlSurface);
 delegate_noop!(App: ignore WlCompositor);
 delegate_noop!(App: ignore WlSeat);
 delegate_noop!(App: ignore ZwlrLayerShellV1);
+delegate_noop!(App: ignore WpViewporter);
+delegate_noop!(App: ignore WpViewport);
 
 impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
     fn event(
@@ -69,19 +77,30 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
                 width,
                 height,
             } => {
-                // info!("Configure recibido: {}x{}", width, height);
-                if width > 0 {
-                    state.width = width;
+                info!("Configuration received: {}x{}", width, height);
+                state.logical_width = width;
+                state.logical_height = height;
+
+                if let Some(vp) = &state.viewport {
+                    vp.set_destination(width as i32, height as i32);
+                    info!("Viewport destination set: {}x{}", width, height);
                 }
-                if height > 0 {
-                    state.height = height;
-                }
+
                 proxy.ack_configure(serial);
                 if let Some(surface) = &state.surface {
                     surface.commit();
                 }
+
                 state.configured = true;
-                // info!("Surface configurada: {}x{}", state.width, state.height);
+                info!(
+                    "Render target: {}x{} ( output: {}x{}, logical: {}x{} )",
+                    state.width,
+                    state.height,
+                    state.output_width,
+                    state.output_height,
+                    state.logical_width,
+                    state.logical_height
+                );
             }
             zwlr_layer_surface_v1::Event::Closed => {
                 warn!("Layer surface closed by the compositor");

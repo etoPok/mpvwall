@@ -5,15 +5,16 @@ use std::time::Instant;
 use calloop::LoopSignal;
 use libmpv2::Mpv;
 use wayland_client::protocol::{
-    wl_callback::WlCallback,
-    wl_compositor::WlCompositor,
-    wl_output::WlOutput,
+    wl_callback::WlCallback, wl_compositor::WlCompositor, wl_output::WlOutput,
     wl_surface::WlSurface,
 };
 use wayland_client::QueueHandle;
 use wayland_protocols_wlr::layer_shell::v1::client::{
-    zwlr_layer_shell_v1::ZwlrLayerShellV1,
-    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    zwlr_layer_shell_v1::ZwlrLayerShellV1, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+};
+
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport::WpViewport, wp_viewporter::WpViewporter,
 };
 
 use crate::render::state::RenderState;
@@ -28,6 +29,17 @@ pub struct App {
 
     pub width: u32,
     pub height: u32,
+
+    /// from wl_output::Mode
+    pub output_width: u32,
+    pub output_height: u32,
+
+    /// from ZwlrLayerSurfaceV1::Configure
+    pub logical_width: u32,
+    pub logical_height: u32,
+
+    pub viewporter: Option<WpViewporter>,
+    pub viewport: Option<WpViewport>,
 
     pub output: Option<WlOutput>,
     pub loop_signal: Option<LoopSignal>,
@@ -79,6 +91,12 @@ impl App {
             layer_surface: None,
             width: 0,
             height: 0,
+            output_width: 0,
+            output_height: 0,
+            logical_width: 0,
+            logical_height: 0,
+            viewporter: None,
+            viewport: None,
             output: None,
             loop_signal: None,
             configured: false,

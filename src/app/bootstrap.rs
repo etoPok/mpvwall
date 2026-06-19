@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use calloop::ping;
 use tracing::{info, warn};
 use wayland_client::{globals::registry_queue_init, Connection};
+use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
 use crate::bindings::mpv::{
     mpv_get_property, mpv_node, mpv_render_context, mpv_render_context_set_update_callback,
@@ -75,6 +76,11 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
         warn!("No wl_output detected, compositor will assign the monitor");
     }
 
+    let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
+    if viewporter.is_none() {
+        warn!("wl_viewporter not available, fallback to logical size for EGL");
+    }
+
     // ------------------------------------------------------------------
     // 2. Initial state
     // ------------------------------------------------------------------
@@ -82,6 +88,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     let mut app = App::new(compositor, layer_shell);
     app.output = output;
     app.qh = Some(qh.clone());
+    app.viewporter = viewporter;
 
     queue
         .roundtrip(&mut app)
@@ -105,32 +112,39 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
         // returns upon receiving events
         queue
             .blocking_dispatch(&mut app)
-            .context("Error esperando configure")?;
+            .context("Error waiting for configure")?;
         configure_attempts += 1;
     }
 
     if !app.configured {
         anyhow::bail!(
-            "El compositor no envió configure tras {} intentos.",
+            "Compositor did not send configuration after {} attempts.",
             configure_attempts
         );
     }
 
     let wl_surface_ptr = app.wl_surface_ptr;
     if wl_surface_ptr.is_null() {
-        anyhow::bail!("No se pudo obtener el puntero nativo de la wl_surface");
+        anyhow::bail!("Could not obtain the native pointer of the wl_surface");
     }
 
     // ------------------------------------------------------------------
     // 4. Initialize EGL/OpenGL
     // ------------------------------------------------------------------
 
-    let width = app.width as i32;
-    let height = app.height as i32;
+    let width = if app.width > 0 {
+        app.width
+    } else {
+        app.logical_width.max(1920)
+    } as i32;
+    let height = if app.height > 0 {
+        app.height
+    } else {
+        app.logical_height.max(1080)
+    } as i32;
 
     let (egl_display, egl_surface, egl_context, egl_window) = unsafe {
-        init_egl(wl_display_ptr, wl_surface_ptr, width, height)
-            .context("Error inicializando EGL")?
+        init_egl(wl_display_ptr, wl_surface_ptr, width, height).context("Error initializing EGL")?
     };
 
     // ------------------------------------------------------------------
@@ -144,13 +158,13 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     // ------------------------------------------------------------------
 
     let render_ctx =
-        unsafe { create_render_context(&mpv).context("Error creando mpv_render_context")? };
+        unsafe { create_render_context(&mpv).context("Error creating mpv_render_context")? };
 
     // ------------------------------------------------------------------
     // 7. Set up mpv update callback + wakeup mechanism
     // ------------------------------------------------------------------
 
-    let (ping, ping_source) = ping::make_ping().context("Error creando ping para wakeup")?;
+    let (ping, ping_source) = ping::make_ping().context("Error creating ping for wakeup")?;
 
     let update_state = Box::new(MpvUpdateState {
         needs_update: AtomicBool::new(false),
@@ -189,7 +203,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
         .as_mut()
         .unwrap()
         .command("loadfile", &[video_path_str.as_str(), "replace"])
-        .map_err(|e| anyhow::anyhow!("Error cargando video en mpv: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Error loading video in mpv: {}", e))?;
 
     info!("Video loaded, waiting for playback...");
 
