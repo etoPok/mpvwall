@@ -14,7 +14,7 @@ impl App {
             &surface,
             output,
             zwlr_layer_shell_v1::Layer::Background,
-            "mpv-wallpaper".to_string(),
+            "mpvwall".to_string(),
             qh,
             (),
         );

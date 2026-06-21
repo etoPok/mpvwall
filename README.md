@@ -1,10 +1,10 @@
-# mpv-wallpaper
+# mpvwall
 
-mpv-wallpaper le permite reproducir videos como fondo de pantalla usando mpv. Es una herramienta minima para Hyprland/Wayland.
+mpvwall is a Wayland video wallpaper client for compositors supporting the wlr-layer-shell protocol, such as Hyprland and Sway.
 
 <https://github.com/user-attachments/assets/57822542-0f9a-4e3c-80a4-d007ef744a7e>
 
-## Dependencias del sistema
+## System dependencies
 
 ### Runtime
 
@@ -32,56 +32,56 @@ sudo apt install libmpv-dev pkg-config build-essential
 sudo dnf install mpv-devel pkg-config gcc
 ```
 
-Verificar que pkg-config encuentra libmpv:
+Verify that pkg-config finds libmpv:
 
 ```bash
 pkg-config --modversion mpv
-# Debe imprimir algo como: 0.37.0
+# Should print something like: 0.37.0
 ```
 
-## Compilación
+## Compilation
 
 ```bash
 git clone <repo>
-cd mpv-wallpaper
+cd mpvwall
 cargo build --release
 ```
 
-## Uso
+## Usage
 
 ```bash
-# Básico
-./target/release/mpv-wallpaper /ruta/al/video.mp4
+# Basic
+./target/release/mpvwall /path/to/video.mp4
 
-# O con cargo
-cargo run --release -- /ruta/al/video.mp4
+# Or with cargo
+cargo run --release -- /path/to/video.mp4
 
-# Con logging más verbose
-RUST_LOG=mpv_wallpaper=debug ./target/release/mpv-wallpaper video.mp4
+# With more verbose logging
+RUST_LOG=mpv_wallpaper=debug ./target/release/mpvwall video.mp4
 ```
 
 ### CLI Flags
 
-| Flag | Valores | Default | Notas |
-|------|---------|---------|-------|
-| `-h, --help` | | | Muestra ayuda |
-| `<video_path>` | ruta de archivo | requerido | Validado que existe |
+| Flag | Values | Default | Notes |
+|------|--------|---------|-------|
+| `-h, --help` | | | Shows help |
+| `<video_path>` | file path | required | Validated that it exists |
 
-## Integración con Hyprland
+## Hyprland integration
 
-Añadir a `~/.config/hypr/hyprland.conf`:
+Add to `~/.config/hypr/hyprland.conf`:
 
 ```conf
-# Iniciar wallpaper al arrancar Hyprland
-exec-once = /ruta/a/mpv-wallpaper /ruta/al/video.mp4
+# Start wallpaper when Hyprland boots
+exec-once = /path/to/mpvwall /path/to/video.mp4
 ```
 
-## Formatos de video recomendados
+## Recommended video formats
 
-Para bajo consumo de CPU/GPU como wallpaper:
+For low CPU/GPU usage as wallpaper:
 
 ```bash
-# Convertir a H.264 optimizado para loop
+# Convert to H.264 optimized for loop
 ffmpeg -i original.mp4 \
   -c:v libx264 -preset slow -crf 18 \
   -an \
@@ -89,44 +89,37 @@ ffmpeg -i original.mp4 \
   -vf "scale=1920:1080:flags=lanczos" \
   wallpaper.mp4
 
-# AV1 (mejor calidad/tamaño, requiere GPU moderna para hwdec)
+# AV1 (better quality/size, requires modern GPU for hwdec)
 ffmpeg -i original.mp4 \
   -c:v libaom-av1 -crf 30 -b:v 0 \
   -an \
   wallpaper.mp4
 ```
 
-## Limitaciones conocidas
+## Known limitations
 
-- **Un solo monitor**: no hay lógica multi-output.
+- **Single monitor**: no multi-output logic.
 
-- **Resize no implementado**: los cambios de resolución del monitor no
-  redimensionan `wl_egl_window`.
+- **Resize not implemented**: monitor resolution changes do not
+  resize `wl_egl_window`.
 
 ## Troubleshooting
 
-### El video no aparece / pantalla negra
+### Video does not appear / black screen
 
 ```bash
-# Verificar logs con debug
+# Check logs with debug
 RUST_LOG=mpv_wallpaper=debug cargo run --release -- video.mp4 2>&1 | head -30
 
-# Verificar que mpv funciona standalone
+# Verify that mpv works standalone
 mpv --vo=gpu --gpu-context=wayland --no-audio video.mp4
 ```
 
 ### Error "zwlr_layer_shell_v1 not available"
 
-El compositor no soporta layer-shell. Verifica que Hyprland está corriendo
-y que `WAYLAND_DISPLAY` apunta al socket correcto:
+The compositor does not support layer-shell. Verify that `WAYLAND_DISPLAY` points to the correct socket:
 
 ```bash
 echo $WAYLAND_DISPLAY
 ls /run/user/$(id -u)/
-```
-
-### Crash al arrancar
-
-```bash
-RUST_LOG=debug cargo run -- video.mp4 2>&1 | head -50
 ```

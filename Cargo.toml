@@ -1,5 +1,5 @@
 [package]
-name = "mpv-wallpaper"
+name = "mpvwall"
 version = "0.1.0"
 edition = "2021"
 description = "Minimal animated wallpaper using libmpv + Wayland layer-shell"

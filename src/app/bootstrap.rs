@@ -36,7 +36,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     let video_path_str = args.video_path;
 
     info!(
-        "mpv-wallpaper starting with video: {} (gpu-api: OpenGL)",
+        "mpvwall starting with video: {} (gpu-api: OpenGL)",
         video_path_str
     );
 
@@ -51,25 +51,25 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     let video_path_str = video_path.to_string_lossy().to_string();
 
     // ------------------------------------------------------------------
-    // 1. Connect to Wayland
+    // Connect to Wayland
     // ------------------------------------------------------------------
 
     let conn = Connection::connect_to_env()
-        .context("No se pudo conectar al servidor Wayland. ¿Está WAYLAND_DISPLAY seteado?")?;
+        .context("Coult not connect to Wayland server, is WAYLAND_DYSPLAY set?")?;
 
     let wl_display_ptr = { conn.backend().display_ptr() as *mut c_void };
 
     let (globals, mut queue) =
-        registry_queue_init::<App>(&conn).context("Error inicializando registry Wayland")?;
+        registry_queue_init::<App>(&conn).context("Error initializing Wayland registry ")?;
     let qh = queue.handle();
 
     let compositor = globals
         .bind(&qh, 4..=5, ())
-        .context("El compositor no soporta wl_compositor")?;
+        .context("Compositor does not support wl_compositor")?;
 
     let layer_shell = globals
         .bind(&qh, 1..=4, ())
-        .context("El compositor no soporta zwlr_layer_shell_v1")?;
+        .context("Composior does not support zwlr_layer_shell_v1")?;
 
     let output: Option<_> = globals.bind(&qh, 1..=4, ()).ok();
     if output.is_none() {
@@ -82,7 +82,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     }
 
     // ------------------------------------------------------------------
-    // 2. Initial state
+    // Initial state
     // ------------------------------------------------------------------
 
     let mut app = App::new(compositor, layer_shell);
@@ -92,7 +92,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
 
     queue
         .roundtrip(&mut app)
-        .context("Error en roundtrip inicial")?;
+        .context("Error in initial roundtrip")?;
 
     if app.width == 0 || app.height == 0 {
         warn!("Output dimensions not detected, using 1920x1080 as fallback");
@@ -101,7 +101,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     }
 
     // ------------------------------------------------------------------
-    // 3. Create layer-shell surface
+    // Create layer-shell surface
     // ------------------------------------------------------------------
 
     app.create_surfaces(&qh);
@@ -129,7 +129,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     }
 
     // ------------------------------------------------------------------
-    // 4. Initialize EGL/OpenGL
+    // Initialize EGL/OpenGL
     // ------------------------------------------------------------------
 
     let width = if app.width > 0 {
@@ -148,20 +148,20 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     };
 
     // ------------------------------------------------------------------
-    // 5. Initialize libmpv
+    // Initialize libmpv
     // ------------------------------------------------------------------
 
     let mpv = init_mpv()?;
 
     // ------------------------------------------------------------------
-    // 6. Create mpv_render_context on the active EGLContext
+    // Create mpv_render_context on the active EGLContext
     // ------------------------------------------------------------------
 
     let render_ctx =
         unsafe { create_render_context(&mpv).context("Error creating mpv_render_context")? };
 
     // ------------------------------------------------------------------
-    // 7. Set up mpv update callback + wakeup mechanism
+    // Set up mpv update callback + wakeup mechanism
     // ------------------------------------------------------------------
 
     let (ping, ping_source) = ping::make_ping().context("Error creating ping for wakeup")?;
@@ -196,7 +196,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     app.mpv = Some(mpv);
 
     // ------------------------------------------------------------------
-    // 8. Load video into mpv and wait for playback to start
+    // Load video into mpv and wait for playback to start
     // ------------------------------------------------------------------
 
     app.mpv
