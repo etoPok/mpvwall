@@ -2,7 +2,7 @@
 
 mpvwall is a Wayland video wallpaper client for compositors supporting the wlr-layer-shell protocol, such as Hyprland and Sway.
 
-<https://github.com/user-attachments/assets/57822542-0f9a-4e3c-80a4-d007ef744a7e>
+<https://github.com/user-attachments/assets/99ecf992-db35-4fcb-811c-7cd1131fb6b8>
 
 ## System dependencies
 
