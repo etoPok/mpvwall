@@ -56,6 +56,15 @@ cargo build --release
 # Or with cargo
 cargo run --release -- /path/to/video.mp4
 
+# Specify a single output
+./target/release/mpvwall -o eDP-1 /path/to/video.mp4
+
+# Specify multiple outputs (repeated flag)
+./target/release/mpvwall -o eDP-1 -o DP-3 /path/to/video.mp4
+
+# Specify multiple outputs (comma-separated)
+./target/release/mpvwall -o eDP-1,DP-3 /path/to/video.mp4
+
 # With more verbose logging
 RUST_LOG=mpv_wallpaper=debug ./target/release/mpvwall video.mp4
 ```
@@ -65,6 +74,7 @@ RUST_LOG=mpv_wallpaper=debug ./target/release/mpvwall video.mp4
 | Flag | Values | Default | Notes |
 |------|--------|---------|-------|
 | `-h, --help` | | | Shows help |
+| `-o, --output` | connector name | all outputs | Can be repeated or comma-separated (e.g. `-o eDP-1,DP-3`) |
 | `<video_path>` | file path | required | Validated that it exists |
 
 ## Hyprland integration
