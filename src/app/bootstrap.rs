@@ -1,7 +1,6 @@
-use std::os::raw::{c_char, c_void};
+use std::ffi::CString;
+use std::os::raw::c_void;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use calloop::ping;
@@ -10,17 +9,11 @@ use wayland_client::protocol::wl_output::WlOutput;
 use wayland_client::{globals::registry_queue_init, Connection};
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
-use crate::bindings::mpv::{
-    mpv_get_property, mpv_node, mpv_render_context_set_update_callback, MPV_FORMAT_STRING,
-};
 use crate::cli::args::Args;
-use crate::mpv::callbacks::mpv_update_callback;
-use crate::mpv::events::fmt_mpv_error;
-use crate::mpv::init::init_mpv;
+use crate::decoder::Decoder;
 use crate::render::egl::init_egl;
-use crate::render::mpv_render::create_render_context;
 use crate::render::state::RenderState;
-use crate::runtime::wakeup::MpvUpdateState;
+use crate::shader::{QuadGeometry, Shader};
 
 use super::state::{App, Monitor};
 
@@ -28,18 +21,15 @@ pub struct BootstrapOutput {
     pub app: App,
     pub conn: Connection,
     pub queue: wayland_client::EventQueue<App>,
-    pub ping_source: ping::PingSource,
+    pub ping_source: calloop::ping::PingSource,
 }
 
 pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     let video_path_str = args.video_path;
 
-    info!(
-        "mpvwall starting with video: {} (gpu-api: OpenGL)",
-        video_path_str
-    );
+    info!("mpvwall starting with video: {}", video_path_str);
 
-    // Validate that the video file exists before proceeding
+    // Validate file
     let video_path = Path::new(&video_path_str);
     if !video_path.exists() {
         anyhow::bail!("El archivo de video no existe: {}", video_path.display());
@@ -54,12 +44,12 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     // ------------------------------------------------------------------
 
     let conn = Connection::connect_to_env()
-        .context("Coult not connect to Wayland server, is WAYLAND_DYSPLAY set?")?;
+        .context("Could not connect to Wayland server, is WAYLAND_DISPLAY set?")?;
 
-    let wl_display_ptr = { conn.backend().display_ptr() as *mut c_void };
+    let wl_display_ptr = conn.backend().display_ptr() as *mut c_void;
 
     let (globals, mut queue) =
-        registry_queue_init::<App>(&conn).context("Error initializing Wayland registry ")?;
+        registry_queue_init::<App>(&conn).context("Error initializing Wayland registry")?;
     let qh = queue.handle();
 
     let compositor = globals
@@ -68,7 +58,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
 
     let layer_shell = globals
         .bind(&qh, 1..=4, ())
-        .context("Composior does not support zwlr_layer_shell_v1")?;
+        .context("Compositor does not support zwlr_layer_shell_v1")?;
 
     let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
     if viewporter.is_none() {
@@ -83,9 +73,6 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     app.qh = Some(qh.clone());
     app.viewporter = viewporter;
 
-    // Bind wl_output objects from the initial global list.
-    // registry_queue_init already consumed the WlRegistry::Global events,
-    // so we must iterate the stored GlobalListContents to discover outputs.
     let registry = globals.registry();
     for global in globals.contents().clone_list() {
         if global.interface == "wl_output" {
@@ -100,7 +87,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
         .roundtrip(&mut app)
         .context("Error in initial roundtrip")?;
 
-    // validate that all passed output names exist among detected monitors
+    // Filter by output name if requested
     if !args.outputs.is_empty() {
         let invalid_names: Vec<&String> = args
             .outputs
@@ -135,7 +122,7 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     }
 
     // ------------------------------------------------------------------
-    // Create layer-shell surface
+    // Create layer-shell surfaces
     // ------------------------------------------------------------------
 
     for (i, monitor) in app.monitors.iter_mut().enumerate() {
@@ -155,10 +142,8 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
         );
     }
 
-    // wait for surface config
     let mut configure_attempts = 0;
     while !app.configured && configure_attempts < 50 {
-        // returns upon receiving events
         queue
             .blocking_dispatch(&mut app)
             .context("Error waiting for configure")?;
@@ -206,114 +191,72 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
             egl_window,
             width,
             height,
+            textures: Vec::new(),
         });
     }
 
     // ------------------------------------------------------------------
-    // Initialize libmpv
+    // Initialize OpenGL (gl::load_with) — use last monitor's context
     // ------------------------------------------------------------------
 
-    let mpv = init_mpv()?;
-
-    // ------------------------------------------------------------------
-    // Create mpv_render_context on the active EGLContext
-    // ------------------------------------------------------------------
-
-    let render_ctx =
-        unsafe { create_render_context(&mpv).context("Error creating mpv_render_context")? };
-
-    // ------------------------------------------------------------------
-    // Set up mpv update callback + wakeup mechanism
-    // ------------------------------------------------------------------
-
-    let (ping, ping_source) = ping::make_ping().context("Error creating ping for wakeup")?;
-
-    let update_state = Box::new(MpvUpdateState {
-        needs_update: AtomicBool::new(false),
-        ping,
-    });
-    let update_state_ptr = Box::into_raw(update_state);
-
-    unsafe {
-        mpv_render_context_set_update_callback(
-            render_ctx,
-            mpv_update_callback,
-            update_state_ptr as *mut c_void,
-        );
-    }
-
-    app.mpv_render_ctx = render_ctx;
-    app.mpv_update_state = Some(update_state_ptr);
-    app.mpv = Some(mpv);
-
-    // ------------------------------------------------------------------
-    // Load video into mpv and wait for playback to start
-    // ------------------------------------------------------------------
-
-    app.mpv
-        .as_mut()
-        .unwrap()
-        .command("loadfile", &[video_path_str.as_str(), "replace"])
-        .map_err(|e| anyhow::anyhow!("Error loading video in mpv: {}", e))?;
-
-    info!("Video loaded, waiting for playback...");
-
-    // Wait for mpv to load the file before checking hwdec.
-    let mut hwdec_checked = false;
     {
-        let mpv_ref = app.mpv.as_mut().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            match mpv_ref.event_context_mut().wait_event(0.5) {
-                Some(Ok(libmpv2::events::Event::FileLoaded)) => {
-                    info!("Video loaded by mpv, checking hardware acceleration...");
-                    hwdec_checked = true;
-                    break;
-                }
-                Some(Ok(libmpv2::events::Event::EndFile(reason))) => {
-                    warn!("mpv: EndFile before loading: {:?}", reason);
-                    break;
-                }
-                Some(Ok(libmpv2::events::Event::Shutdown)) => {
-                    anyhow::bail!("mpv se cerró inesperadamente durante carga");
-                }
-                Some(Ok(_)) => {}
-                Some(Err(e)) => {
-                    warn!("Error in mpv event during loading: {}", fmt_mpv_error(&e));
-                    break;
-                }
-                None => {}
-            }
+        let last_rs = app.render_states.last().unwrap();
+        unsafe {
+            crate::render::egl::eglMakeCurrent(
+                last_rs.egl_display,
+                last_rs.egl_surface,
+                last_rs.egl_surface,
+                last_rs.egl_context,
+            );
         }
     }
 
-    // Check hardware acceleration (now after FileLoaded).
-    if hwdec_checked {
-        unsafe {
-            let prop = b"hwdec-current\0";
-            let mut msg = std::mem::zeroed::<mpv_node>();
-            let ret = mpv_get_property(
-                app.mpv.as_ref().unwrap().ctx.as_ptr() as *mut crate::bindings::mpv::mpv_handle,
-                prop.as_ptr() as *const c_char,
-                MPV_FORMAT_STRING,
-                &mut msg as *mut _ as *mut c_void,
-            );
-            if ret >= 0 {
-                if !msg.udata.string.is_null() {
-                    let hw = std::ffi::CStr::from_ptr(msg.udata.string).to_string_lossy();
-                    info!("Hardware acceleration active: {}", hw);
-                    libc::free(msg.udata.string as *mut c_void);
-                } else {
-                    warn!("hwdec-current: (null) — CPU decoding. Consider installing VAAPI for hardware acceleration");
-                }
-            } else {
-                warn!(
-                    "Could not query hwdec-current (code {}). CPU decoding.",
-                    ret
-                );
-            }
-        }
-    }
+    gl::load_with(|name| {
+        let c_str = CString::new(name).unwrap();
+        unsafe { crate::render::egl::eglGetProcAddress(c_str.as_ptr()) as *const _ }
+    });
+
+    info!("OpenGL functions loaded successfully");
+
+    // ------------------------------------------------------------------
+    // Compile shaders
+    // ------------------------------------------------------------------
+
+    let shader_yuv = Shader::new_yuv420p();
+    let shader_nv12 = Shader::new_nv12();
+    info!("Shaders compiled (YUV420P + NV12)");
+
+    // ------------------------------------------------------------------
+    // Init quad geometry
+    // ------------------------------------------------------------------
+
+    let quad = QuadGeometry::new();
+    info!("Quad geometry initialized");
+
+    // ------------------------------------------------------------------
+    // Frame wakeup (PingSource — eventfd based)
+    // ------------------------------------------------------------------
+
+    let (ping, ping_source) = ping::make_ping()
+        .context("Failed to create decoder wakeup ping")?;
+    let notifier = crate::notifier::Notifier(ping);
+
+    // ------------------------------------------------------------------
+    // Start decoder
+    // ------------------------------------------------------------------
+
+    let decoder = Decoder::start(&video_path_str, app.frame_queue.clone(), notifier)
+        .context("Failed to start decoder")?;
+
+    info!(
+        "Decoder started: {}x{}, time_base={}",
+        decoder.width, decoder.height, decoder.time_base
+    );
+
+    app.decoder = Some(decoder);
+    app.shader_yuv = Some(shader_yuv);
+    app.shader_nv12 = Some(shader_nv12);
+    app.quad = Some(quad);
 
     info!("Starting render loop...");
 

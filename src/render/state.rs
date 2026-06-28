@@ -1,10 +1,10 @@
 use std::os::raw::c_void;
 
-use crate::bindings::egl::{
+use crate::render::egl::{
     eglDestroyContext, eglDestroySurface, eglMakeCurrent, eglTerminate, EGL_NO_CONTEXT,
     EGL_NO_DISPLAY, EGL_NO_SURFACE,
 };
-use crate::bindings::wayland_egl::{wl_egl_window_destroy, wl_egl_window_resize};
+use crate::render::egl::{wl_egl_window_destroy, wl_egl_window_resize};
 
 pub struct RenderState {
     pub egl_display: *mut c_void,
@@ -13,6 +13,7 @@ pub struct RenderState {
     pub egl_window: *mut c_void,
     pub width: i32,
     pub height: i32,
+    pub textures: Vec<gl::types::GLuint>,
 }
 
 // SAFETY: accessed only from the main thread
@@ -22,6 +23,9 @@ unsafe impl Sync for RenderState {}
 impl Drop for RenderState {
     fn drop(&mut self) {
         unsafe {
+            if !self.textures.is_empty() {
+                gl::DeleteTextures(self.textures.len() as i32, self.textures.as_ptr());
+            }
             eglMakeCurrent(
                 self.egl_display,
                 EGL_NO_SURFACE,

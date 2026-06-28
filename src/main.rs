@@ -1,9 +1,14 @@
+#![allow(dead_code)]
+
 mod app;
-mod bindings;
 mod cli;
-mod mpv;
+mod decoder;
+mod frame_queue;
+mod notifier;
 mod render;
 mod runtime;
+mod shader;
+mod timing;
 mod wayland;
 
 use anyhow::Result;

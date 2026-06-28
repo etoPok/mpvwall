@@ -1,25 +1,26 @@
 use std::os::raw::c_void;
 use std::ptr;
+use std::sync::Arc;
 use std::time::Instant;
 
 use calloop::LoopSignal;
-use libmpv2::Mpv;
 use wayland_client::protocol::{
     wl_callback::WlCallback, wl_compositor::WlCompositor, wl_output::WlOutput,
     wl_surface::WlSurface,
 };
 use wayland_client::QueueHandle;
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport::WpViewport, wp_viewporter::WpViewporter,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::ZwlrLayerShellV1, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
 };
 
-use wayland_protocols::wp::viewporter::client::{
-    wp_viewport::WpViewport, wp_viewporter::WpViewporter,
-};
-
-use crate::bindings::mpv::{mpv_render_context, mpv_render_context_free};
+use crate::decoder::Decoder;
+use crate::frame_queue::FrameQueue;
 use crate::render::state::RenderState;
-use crate::runtime::wakeup::MpvUpdateState;
+use crate::shader::{QuadGeometry, Shader};
+use crate::timing::Timing;
 
 pub struct Monitor {
     pub name: Option<String>,
@@ -27,14 +28,11 @@ pub struct Monitor {
     pub surface: Option<WlSurface>,
 
     /// Pointer to the native wl_surface (for wl_egl_window_create).
-    /// Obtained via wayland_backend::sys.
     pub wl_surface_ptr: *mut c_void,
 
     pub layer_surface: Option<ZwlrLayerSurfaceV1>,
     pub viewport: Option<WpViewport>,
 
-    /// Wayland frame callback. MUST be kept alive; if dropped,
-    /// wayland-client sends wl_proxy_destroy and the compositor cancels the callback.
     pub wl_callback: Option<WlCallback>,
 
     pub physical_width: u32,
@@ -71,7 +69,6 @@ impl Drop for Monitor {
         if let Some(s) = self.surface.take() {
             s.destroy();
         }
-
         if let Some(vp) = self.viewport.take() {
             vp.destroy();
         }
@@ -87,33 +84,25 @@ pub struct App {
     pub loop_signal: Option<LoopSignal>,
     pub configured: bool,
 
-    /// Wayland queue handle, needed to request frame callbacks.
     pub qh: Option<QueueHandle<App>>,
 
-    /// EGL/mpv render state.
     pub render_states: Vec<RenderState>,
 
-    pub mpv_render_ctx: *mut mpv_render_context,
+    // Decoder + Frame Queue
+    pub decoder: Option<Decoder>,
+    pub frame_queue: Arc<FrameQueue>,
 
-    /// mpv instance.
-    pub mpv: Option<Mpv>,
+    // Shaders + Geometry
+    pub shader_yuv: Option<Shader>,
+    pub shader_nv12: Option<Shader>,
+    pub quad: Option<QuadGeometry>,
 
-    /// true when mpv has a new frame ready to render.
-    /// Raw pointer to the boxed MpvUpdateState; freed on cleanup.
-    pub mpv_update_state: Option<*mut MpvUpdateState>,
+    // Timing
+    pub timing: Option<Timing>,
+    pub last_pts: Option<i64>,
 
-    /// Number of wl_callback frames currently in-flight across all monitors.
-    /// Decremented each time a callback fires. When it reaches 0, all monitors
-    /// are ready for the next frame.
-    pub pending_wl_callbacks: usize,
-
-    /// First render attempt done (to render the first frame without depending on mpv_update_callback).
-    pub first_render_attempted: bool,
-
-    /// Rendered frame counter (for periodic stats).
+    // Stats
     pub frame_count: u64,
-
-    /// Timestamp of the last stats log.
     pub last_stats_time: Option<Instant>,
 }
 
@@ -128,32 +117,15 @@ impl App {
             configured: false,
             qh: None,
             render_states: Vec::new(),
-            mpv_render_ctx: ptr::null_mut(),
-            mpv: None,
-            mpv_update_state: None,
-            pending_wl_callbacks: 0,
-            first_render_attempted: false,
+            decoder: None,
+            frame_queue: Arc::new(FrameQueue::new()),
+            shader_yuv: None,
+            shader_nv12: None,
+            quad: None,
+            timing: None,
+            last_pts: None,
             frame_count: 0,
             last_stats_time: None,
-        }
-    }
-}
-
-impl Drop for App {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(state_ptr) = self.mpv_update_state.take() {
-                drop(Box::from_raw(state_ptr));
-            }
-            if !self.mpv_render_ctx.is_null() {
-                mpv_render_context_free(self.mpv_render_ctx);
-            }
-        }
-
-        self.render_states.clear();
-
-        if let Some(mpv) = self.mpv.take() {
-            drop(mpv);
         }
     }
 }

@@ -2,7 +2,7 @@
 name = "mpvwall"
 version = "0.1.0"
 edition = "2021"
-description = "Minimal animated wallpaper using libmpv + Wayland layer-shell"
+description = "Minimal animated wallpaper using FFmpeg + OpenGL + Wayland layer-shell"
 
 [[bin]]
 name = "mpvwall"
@@ -25,8 +25,12 @@ smithay-client-toolkit = { version = "0.18", default-features = false, features 
 calloop = "0.13"
 calloop-wayland-source = "0.3"
 
-# libmpv bindings
-libmpv2 = "3"
+# FFmpeg
+ffmpeg-next = "8.1"
+ffmpeg-sys-next = "8.1"
+
+# OpenGL bindings
+gl = "0.14"
 
 # Error handling
 anyhow = "1"
@@ -37,4 +41,3 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # POSIX signals for clean shutdown
 libc = "0.2"
-
