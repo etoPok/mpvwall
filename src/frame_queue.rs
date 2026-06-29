@@ -2,9 +2,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Condvar, Mutex};
 
-use ffmpeg_sys_next::{
-    av_frame_alloc, av_frame_free, av_frame_unref, AVFrame,
-};
+use ffmpeg_sys_next::{av_frame_alloc, av_frame_free, av_frame_unref, AVFrame};
 
 const QUEUE_SIZE: usize = 3;
 
@@ -24,13 +22,7 @@ unsafe impl Sync for FrameQueue {}
 #[allow(dead_code)]
 impl FrameQueue {
     pub fn new() -> Self {
-        let slots = unsafe {
-            [
-                av_frame_alloc(),
-                av_frame_alloc(),
-                av_frame_alloc(),
-            ]
-        };
+        let slots = unsafe { [av_frame_alloc(), av_frame_alloc(), av_frame_alloc()] };
         assert!(!slots[0].is_null());
         assert!(!slots[1].is_null());
         assert!(!slots[2].is_null());
@@ -50,7 +42,9 @@ impl FrameQueue {
         let _guard = self.mutex.lock().unwrap();
         let _guard = self
             .not_full
-            .wait_while(_guard, |_| self.count.load(Ordering::Acquire) >= QUEUE_SIZE as u32)
+            .wait_while(_guard, |_| {
+                self.count.load(Ordering::Acquire) >= QUEUE_SIZE as u32
+            })
             .unwrap();
 
         let idx = self.write_idx.get() as usize % QUEUE_SIZE;
@@ -85,10 +79,6 @@ impl FrameQueue {
     }
 
     pub fn try_get_read_slot(&self) -> Option<*mut AVFrame> {
-        if self.count.load(Ordering::Acquire) == 0 {
-            return None;
-        }
-        let _guard = self.mutex.lock().unwrap();
         if self.count.load(Ordering::Acquire) == 0 {
             return None;
         }
