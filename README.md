@@ -4,39 +4,32 @@ waywall is a Wayland video wallpaper client for compositors supporting the wlr-l
 
 <https://github.com/user-attachments/assets/99ecf992-db35-4fcb-811c-7cd1131fb6b8>
 
-## System dependencies
+## Dependencies
 
-### Runtime
-
-```bash
-# Arch Linux / Manjaro
-sudo pacman -S mpv
-
-# Ubuntu 24.04 / Debian Bookworm
-sudo apt install libmpv-dev libmpv2
-
-# Fedora
-sudo dnf install mpv-libs
-```
-
-### Build
+Requires a Wayland compositor with GPU support. Only FFmpeg needs to be installed explicitly:
 
 ```bash
 # Arch Linux
-sudo pacman -S mpv pkg-config
+sudo pacman -S ffmpeg
 
-# Ubuntu / Debian
-sudo apt install libmpv-dev pkg-config build-essential
+# Ubuntu 24.04 / Debian Bookworm
+sudo apt install ffmpeg
 
 # Fedora
-sudo dnf install mpv-devel pkg-config gcc
+sudo dnf install ffmpeg
 ```
 
-Verify that pkg-config finds libmpv:
+Build dependencies:
 
 ```bash
-pkg-config --modversion mpv
-# Should print something like: 0.37.0
+# Arch Linux
+sudo pacman -S base-devel pkg-config ffmpeg
+
+# Ubuntu / Debian
+sudo apt install pkg-config build-essential libavformat-dev libavcodec-dev libavutil-dev
+
+# Fedora
+sudo dnf install gcc pkg-config ffmpeg-devel
 ```
 
 ## Compilation
@@ -66,7 +59,7 @@ cargo run --release -- /path/to/video.mp4
 ./target/release/waywall -o eDP-1,DP-3 /path/to/video.mp4
 
 # With more verbose logging
-RUST_LOG=mpv_wallpaper=debug ./target/release/waywall video.mp4
+RUST_LOG=waywall=debug ./target/release/waywall video.mp4
 ```
 
 ### CLI Flags
@@ -117,10 +110,7 @@ ffmpeg -i original.mp4 \
 
 ```bash
 # Check logs with debug
-RUST_LOG=mpv_wallpaper=debug cargo run --release -- video.mp4 2>&1 | head -30
-
-# Verify that mpv works standalone
-mpv --vo=gpu --gpu-context=wayland --no-audio video.mp4
+RUST_LOG=waywall=debug cargo run --release -- video.mp4 2>&1 | head -30
 ```
 
 ### Error "zwlr_layer_shell_v1 not available"
