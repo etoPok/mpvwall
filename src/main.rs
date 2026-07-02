@@ -25,5 +25,11 @@ fn main() -> Result<()> {
 
     let output = app::bootstrap::bootstrap(args)?;
 
-    runtime::event_loop::run(output.app, output.conn, output.queue, output.ping_source)
+    runtime::event_loop::run(
+        output.app,
+        output.conn,
+        output.queue,
+        output.ping_source,
+        output.error_ping_source,
+    )
 }

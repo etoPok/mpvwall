@@ -22,6 +22,7 @@ pub struct BootstrapOutput {
     pub conn: Connection,
     pub queue: wayland_client::EventQueue<App>,
     pub ping_source: calloop::ping::PingSource,
+    pub error_ping_source: calloop::ping::PingSource,
 }
 
 pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
@@ -234,19 +235,26 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
     info!("Quad geometry initialized");
 
     // ------------------------------------------------------------------
-    // Frame wakeup (PingSource — eventfd based)
+    // PingSource
     // ------------------------------------------------------------------
 
-    let (ping, ping_source) = ping::make_ping()
-        .context("Failed to create decoder wakeup ping")?;
+    let (ping, ping_source) = ping::make_ping().context("Failed to create decoder wakeup ping")?;
     let notifier = crate::notifier::Notifier(ping);
+
+    let (error_ping, error_ping_source) =
+        ping::make_ping().context("Failed to create decoder error ping")?;
 
     // ------------------------------------------------------------------
     // Start decoder
     // ------------------------------------------------------------------
 
-    let decoder = Decoder::start(&video_path_str, app.frame_queue.clone(), notifier)
-        .context("Failed to start decoder")?;
+    let decoder = Decoder::start(
+        &video_path_str,
+        app.frame_queue.clone(),
+        notifier,
+        error_ping,
+    )
+    .context("Failed to start decoder")?;
 
     info!(
         "Decoder started: {}x{}, time_base={}",
@@ -265,5 +273,6 @@ pub fn bootstrap(args: Args) -> Result<BootstrapOutput> {
         conn,
         queue,
         ping_source,
+        error_ping_source,
     })
 }

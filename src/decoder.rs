@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use anyhow::{Context, Result};
+use calloop::ping;
 use ffmpeg_sys_next::*;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::frame_queue::FrameQueue;
 use crate::notifier::Notifier;
@@ -20,7 +21,12 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn start(path: &str, queue: Arc<FrameQueue>, notifier: Notifier) -> Result<Self> {
+    pub fn start(
+        path: &str,
+        queue: Arc<FrameQueue>,
+        notifier: Notifier,
+        error_ping: ping::Ping,
+    ) -> Result<Self> {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
 
@@ -126,6 +132,7 @@ impl Decoder {
                     queue,
                     notifier,
                     &running_clone,
+                    error_ping,
                 );
             })
             .context("Failed to spawn decoder thread")?;
@@ -155,6 +162,7 @@ fn decode_loop(
     queue: Arc<FrameQueue>,
     notifier: Notifier,
     running: &AtomicBool,
+    error_ping: ping::Ping,
 ) {
     let mut packet = unsafe { av_packet_alloc() };
     if packet.is_null() {
@@ -162,28 +170,35 @@ fn decode_loop(
         return;
     }
 
-    while running.load(Ordering::Relaxed) {
+    let mut fatal = false;
+
+    'decode: while running.load(Ordering::Relaxed) {
         let ret = unsafe { av_read_frame(fmt_ctx, packet) };
 
         if ret < 0 {
-            // Before flushing at EOF, we must send a NULL packet to signal end-of-stream.
-            // Modern codecs (H.264, HEVC) use frame reordering (B-frames) and maintain an internal
-            // decoding delay. When we reach EOF, the decoder may have fully decoded frames buffered
-            // internally waiting for their presentation order, or partial data that needs future packets.
-            // Sending NULL tells the decoder "no more packets will arrive", allowing it to:
-            // 1. Release all buffered frames in presentation order
-            // 2. Discard incomplete data that can never be completed
-            // Without this step, avcodec_flush_buffers would destroy the decoder state and lose
-            // the final frames, causing visible stuttering or frame drops at the loop boundary.
-            unsafe { avcodec_send_packet(codec_ctx, packet) };
-            drain_decoder(&mut codec_ctx, &queue, &notifier);
-
-            unsafe {
-                av_seek_frame(fmt_ctx, video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-                avcodec_flush_buffers(codec_ctx);
+            if ret == AVERROR_EOF {
+                // Before flushing at EOF, we must send a NULL packet to signal end-of-stream.
+                // Modern codecs (H.264, HEVC) use frame reordering (B-frames) and maintain an internal
+                // decoding delay. When we reach EOF, the decoder may have fully decoded frames buffered
+                // internally waiting for their presentation order, or partial data that needs future packets.
+                // Sending NULL tells the decoder "no more packets will arrive", allowing it to:
+                // 1. Release all buffered frames in presentation order
+                // 2. Discard incomplete data that can never be completed
+                // Without this step, avcodec_flush_buffers would destroy the decoder state and lose
+                // the final frames, causing visible stuttering or frame drops at the loop boundary.
+                unsafe {
+                    avcodec_send_packet(codec_ctx, std::ptr::null_mut());
+                    drain_decoder(&mut codec_ctx, &queue, &notifier);
+                    av_seek_frame(fmt_ctx, video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+                    avcodec_flush_buffers(codec_ctx);
+                }
+                info!("Decoder: EOF, restarting playback loop");
+                continue;
+            } else {
+                error!("Error reading frame: {}", ret);
+                fatal = true;
+                break 'decode;
             }
-            info!("Decoder: EOF, restarting playback loop");
-            continue;
         }
 
         let stream_idx = unsafe { (*packet).stream_index };
@@ -206,7 +221,8 @@ fn decode_loop(
                 ret if ret == AVERROR(EAGAIN) => {
                     drain_decoder(&mut codec_ctx, &queue, &notifier);
                 }
-                _ => {
+                send_ret => {
+                    warn!("Error sending packet: {}", send_ret);
                     unsafe { av_packet_unref(packet) };
                     break;
                 }
@@ -219,6 +235,10 @@ fn decode_loop(
         av_packet_free(&mut packet);
         avcodec_free_context(&mut codec_ctx);
         avformat_close_input(&mut fmt_ctx);
+    }
+
+    if fatal {
+        error_ping.ping();
     }
 }
 

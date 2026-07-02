@@ -18,6 +18,7 @@ pub fn run(
     conn: Connection,
     queue: EventQueue<App>,
     ping_source: PingSource,
+    error_ping_source: PingSource,
 ) -> anyhow::Result<()> {
     let mut event_loop: EventLoop<App> =
         EventLoop::try_new().context("Error creating event loop")?;
@@ -36,6 +37,16 @@ pub fn run(
             process_frame(app);
         })
         .map_err(|e| anyhow::anyhow!("Error registering decoder ping: {}", e))?;
+
+    // ErrorPingSource — fires once when decoder encounters a fatal error
+    event_loop
+        .handle()
+        .insert_source(error_ping_source, |(), _, app| {
+            if let Some(ref signal) = app.loop_signal {
+                signal.stop();
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("Error registering decoder error ping: {}", e))?;
 
     // Stats timer (every 5 seconds)
     let stats_timer = Timer::from_duration(Duration::from_secs(5));
