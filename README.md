@@ -104,6 +104,9 @@ ffmpeg -i original.mp4 \
 - **Resize not implemented**: monitor resolution changes do not
   resize `wl_egl_window`.
 
+- **4K 60fps video performance**: videos running at 3840×2160 at 60 fps
+  may exhibit indefinite frame loss
+
 ## Troubleshooting
 
 ### Video does not appear / black screen
